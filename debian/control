@@ -1,0 +1,12 @@
+Source: python-command-notifier
+Section: python
+Priority: extra
+Maintainer: Jose Diaz-Gonzalez <jose@seatgeek.com>
+Build-Depends: debhelper (>= 9), python, dh-virtualenv
+Standards-Version: 3.9.5
+
+Package: python-command-notifier
+Architecture: all
+Depends: ${python:Depends}, ${misc:Depends}
+Homepage: http://github.com/josegonzalez/python-command-notifier
+Description: A very simple command-notification package based on SQS for distributed systems

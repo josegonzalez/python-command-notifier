@@ -1,0 +1,87 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import argparse
+import boto.sns
+import json
+import os
+import sys
+import time
+
+
+def print_error(*objs):
+    print("ERROR:", *objs, file=sys.stderr)
+    sys.exit(1)
+
+
+def get_sns_connection(args):
+    return boto.sns.connect_to_region(
+        args.ec2_region,
+        aws_access_key_id=args.aws_access_key_id,
+        aws_secret_access_key=args.aws_secret_access_key,
+    )
+
+
+def get_args():
+    defaults = {
+        'command': os.environ.get('COMMAND', None),
+        'ec2-region': os.environ.get('EC2_REGION'),
+        'aws-access-key-id': os.environ.get('AWS_ACCESS_KEY_ID'),
+        'aws-secret-access-key': os.environ.get('AWS_SECRET_ACCESS_KEY'),
+        'sns-topic': os.environ.get('SNS_TOPIC', 'command-notifier'),
+    }
+    description = 'cn-publish, a tool to publish a command via sns'
+    formatter_class = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=description,
+                                     epilog='cn-publish is pwnage',
+                                     formatter_class=formatter_class)
+    parser.add_argument('-a', '--aws-access-key-id',
+                        type=str,
+                        help='AWS Access Key ID',
+                        default=defaults['aws-access-key-id'],
+                        dest='aws_access_key_id')
+    parser.add_argument('-s', '--aws-secret-access-key',
+                        type=str,
+                        help='AWS Secret Access Key',
+                        default=defaults['aws-secret-access-key'],
+                        dest='aws_secret_access_key')
+    parser.add_argument('-c', '--command',
+                        type=str,
+                        help='Command to publish',
+                        default=defaults['command'],
+                        dest='command')
+    parser.add_argument('-r', '--ec2-region',
+                        type=str,
+                        help='EC2 Region',
+                        default=defaults['ec2-region'],
+                        dest='ec2_region')
+    parser.add_argument('-t', '--sns-topic',
+                        type=str,
+                        help='SNS Topic to publish to',
+                        default=defaults['sns-topic'],
+                        dest='sns_topic')
+    return parser.parse_args()
+
+
+def main():
+    args = get_args()
+    if not args.command:
+        print_error('No command found')
+
+    sns_conn = get_sns_connection(args)
+    topic = sns_conn.create_topic(args.sns_topic)
+    if not topic:
+        print_error('Topic not created "{0}"'.format(args.sns_topic))
+
+    topic_arn = topic['CreateTopicResponse']['CreateTopicResult']['TopicArn']
+    publication = sns_conn.publish(topic_arn, json.dumps({
+        'command': args.command,
+        'timestamp': time.time()
+    }))
+
+    print(publication)
+
+
+if __name__ == '__main__':
+    main()

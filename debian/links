@@ -1,0 +1,2 @@
+/usr/share/python/python-command-notifier/bin/cn-subscribe /usr/bin/cn-subscribe
+/usr/share/python/python-command-notifier/bin/cn-publish /usr/bin/cn-publish
