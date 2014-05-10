@@ -45,7 +45,7 @@ setup(
     packages=['command_notifier'],
     scripts=['bin/cn-publish', 'bin/cn-subscribe'],
     url='https://github.com/josegonzalez/python-command-notifier',
-    license=open('LICENSE.txt').read(),
+    license=open_file('LICENSE.txt').read(),
     classifiers=[
         'Intended Audience :: System Administrators',
         'License :: OSI Approved :: MIT License',
