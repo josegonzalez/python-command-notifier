@@ -8,6 +8,7 @@ import boto.sqs
 import json
 import os
 import Queue
+import re
 import signal
 import socket
 import subprocess
@@ -90,16 +91,38 @@ def get_args():
     return parser.parse_args()
 
 
+def parse_json(filename):
+    """
+    From:
+    http://www.lifl.fr/~riquetd/parse-a-json-file-with-comments.html
+    """
+    # Regular expression for comments
+    comment_re = re.compile(
+        '(^)?[^\S\n]*/(?:\*(.*?)\*/[^\S\n]*|/[^\n]*)($)?',
+        re.DOTALL | re.MULTILINE
+    )
+
+    with open(filename) as f:
+        content = ''.join(f.readlines())
+        match = comment_re.search(content)
+        while match:
+            content = content[:match.start()] + content[match.end():]
+            match = comment_re.search(content)
+        return json.loads(content)
+
+
 def get_whitelisted_commands(args):
     whitelisted_commands = None
     if args.command_file:
         if not os.path.isfile(args.command_file):
             print_error('Invalid path to command file')
 
-        with open(args.command_file) as f:
-            content = ''.join(f.readlines())
-            content = json.loads(content)
-            whitelisted_commands = content.get('commands', [])
+        try:
+            data = parse_json(args.command_file)
+            whitelisted_commands = data.get('commands', None)
+        except IOError:
+            pass
+
     return whitelisted_commands
 
 
@@ -141,10 +164,24 @@ def run_command(command):
             stream.close()
 
     shell = type(command) is not list
+
+    kwargs = {}
+    if type(command) is dict:
+        kwargs = dict(command)
+        command = command['command']
+
+        del kwargs['command']
+        if 'shell' in kwargs:
+            shell = kwargs['shell']
+            del kwargs['shell']
+        else:
+            shell = type(command) is not list
+
     proc = subprocess.Popen(command,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
-                            shell=shell
+                            shell=shell,
+                            **kwargs
                             )
 
     threading.Thread(target=stream_watcher, name='stdout-watcher',
