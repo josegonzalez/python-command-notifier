@@ -19,6 +19,8 @@ pkg
 # Debian Files
 debian/files
 debian/python-command-notifier
+debian/*.log
+debian/*.substvars
 
 # Sphinx build
 doc/_build
