@@ -7,10 +7,12 @@ import boto.sns
 import boto.sqs
 import json
 import os
+import Queue
 import signal
 import socket
 import subprocess
 import sys
+import threading
 
 
 def print_error(*objs):
@@ -37,12 +39,13 @@ def get_sqs_connection(args):
 def get_args():
     default_sqs_queue = 'command-notifier-{0}'.format(socket.getfqdn())
     defaults = {
-        'ec2-region': os.environ.get('EC2_REGION'),
         'aws-access-key-id': os.environ.get('AWS_ACCESS_KEY_ID'),
         'aws-secret-access-key': os.environ.get('AWS_SECRET_ACCESS_KEY'),
+        'command-file': os.environ.get('COMMAND_FILE'),
+        'ec2-region': os.environ.get('EC2_REGION'),
         'sns-topic': os.environ.get('SNS_TOPIC', 'command-notifier'),
-        'sqs-queue': os.environ.get('SQS_QUEUE', default_sqs_queue),
         'sns-wait-time-seconds': os.environ.get('SNS_WAIT_TIME_SECONDS', 20),
+        'sqs-queue': os.environ.get('SQS_QUEUE', default_sqs_queue),
     }
     description = 'cn-subscribe, a tool to run commands published from sqs'
     formatter_class = argparse.RawDescriptionHelpFormatter
@@ -59,6 +62,11 @@ def get_args():
                         help='AWS Secret Access Key',
                         default=defaults['aws-secret-access-key'],
                         dest='aws_secret_access_key')
+    parser.add_argument('-c', '--command-file',
+                        type=str,
+                        help='Path to json file with whitelisted commands',
+                        default=defaults['command-file'],
+                        dest='command_file')
     parser.add_argument('-r', '--ec2-region',
                         type=str,
                         help='EC2 Region',
@@ -82,16 +90,94 @@ def get_args():
     return parser.parse_args()
 
 
+def get_whitelisted_commands(args):
+    whitelisted_commands = None
+    if args.command_file:
+        if not os.path.isfile(args.command_file):
+            print_error('Invalid path to command file')
+
+        with open(args.command_file) as f:
+            content = ''.join(f.readlines())
+            content = json.loads(content)
+            whitelisted_commands = content.get('commands', [])
+    return whitelisted_commands
+
+
+def get_topic(sns_conn, args):
+    topic = sns_conn.create_topic(args.sns_topic)
+    if not topic:
+        print_error('Topic not created "{0}"'.format(args.sns_topic))
+    return topic
+
+
+def get_command(message, whitelisted_commands):
+    raw_message = None
+    try:
+        raw_message = json.loads(message.get_body())
+        raw_message = raw_message.get('Message')
+        raw_message = json.loads(raw_message)
+    except:
+        return None
+
+    command = raw_message.get('command')
+    if not whitelisted_commands:
+        return command
+
+    if command not in whitelisted_commands:
+        return None
+
+    return whitelisted_commands[command]
+
+
+def run_command(command):
+    io_q = Queue.Queue()
+
+    def stream_watcher(identifier, stream):
+
+        for line in stream:
+            io_q.put((identifier, line))
+
+        if not stream.closed:
+            stream.close()
+
+    shell = type(command) is not list
+    proc = subprocess.Popen(command,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            shell=shell
+                            )
+
+    threading.Thread(target=stream_watcher, name='stdout-watcher',
+                     args=('STDOUT', proc.stdout)).start()
+    threading.Thread(target=stream_watcher, name='stderr-watcher',
+                     args=('STDERR', proc.stderr)).start()
+
+    def printer():
+        while True:
+            try:
+                # Block for 1 second.
+                item = io_q.get(True, 1)
+            except Queue.Empty:
+                # No output in either streams for a second. Are we done?
+                if proc.poll() is not None:
+                    break
+            else:
+                identifier, line = item
+                output = identifier + ':' + line
+                print(output.strip())
+
+    threading.Thread(target=printer, name='printer').start()
+
+
 def main():
     args = get_args()
     sns_conn = get_sns_connection(args)
     sqs_conn = get_sqs_connection(args)
 
-    topic = sns_conn.create_topic(args.sns_topic)
-    if not topic:
-        print_error('Topic not created "{0}"'.format(args.sns_topic))
-
+    print('Ensuring topic and queues exist')
+    topic = get_topic(sns_conn, args)
     wait_time_seconds = int(args.sns_wait_time_seconds)
+    whitelisted_commands = get_whitelisted_commands(args)
 
     queue = sqs_conn.create_queue(args.sqs_queue)
     queue.set_attribute('ReceiveMessageWaitTimeSeconds', wait_time_seconds)
@@ -100,11 +186,13 @@ def main():
     sns_conn.subscribe_sqs_queue(topic_arn, queue)
 
     def receive_signal(signalnum, frame):
-        print("Stopping")
+        print("Stopping, waiting for command to finish processing")
         sqs_conn.delete_queue(queue)
 
+    signal.signal(signal.SIGTERM, receive_signal)
     signal.signal(signal.SIGINT, receive_signal)
 
+    print('Ready for commands')
     while True:
         message = None
         try:
@@ -122,15 +210,11 @@ def main():
             if e.error_code == 'AWS.SimpleQueueService.NonExistentQueue':
                 break
 
-        try:
-            raw_message = json.loads(message.get_body())
-            raw_message = raw_message.get('Message')
-            raw_message = json.loads(raw_message)
-        except:
+        command = get_command(message, whitelisted_commands)
+        if command is None:
             continue
 
-        command = raw_message.get('command')
-        subprocess.call(command, shell=True)
+        run_command(command)
 
 
 if __name__ == '__main__':
