@@ -1,5 +1,11 @@
+python-command-notifier (0.0.3) stable; urgency=low
+
+  * Allow running of custom commands
+
+ -- Jose Diaz-Gonzalez <jose@seatgeek.com>  Sun, 11 May 2014 06:39:00 -0500
+
 python-command-notifier (0.0.1) stable; urgency=low
 
   * Initial public release
 
- -- Jose Diaz-Gonzalez <jose@seatgeek.com>  Mon, 10 May 2014 10:36:00 -0500
+ -- Jose Diaz-Gonzalez <jose@seatgeek.com>  Sat, 10 May 2014 10:36:00 -0500
